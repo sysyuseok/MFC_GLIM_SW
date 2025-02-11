@@ -8,6 +8,7 @@
 #include "afxdialogex.h"
 #include <iostream>
 #include <cmath>
+#include <ctime>
 #include "resource.h"
 
 using namespace std;
@@ -23,8 +24,6 @@ using namespace std;
 
 #define WM_UPDATE_RANDOM_RING (WM_USER + 101)
 
-/////////////////////////////////////////////////////////////////////////////
-// CAboutDlg dialog used for App About
 
 class CAboutDlg : public CDialogEx
 {
@@ -86,7 +85,9 @@ BOOL CMFCGLIMSWDlg::OnInitDialog()
 {
     CDialogEx::OnInitDialog();
     ModifyStyle(0, WS_CLIPCHILDREN);
-    // m_image 생성 및 초기화
+
+    srand((unsigned)time(NULL));
+
     m_image.Create(IMAGE_WIDTH, -IMAGE_HEIGHT, IMAGE_BPP);
     if (IMAGE_BPP == 8)
     {
@@ -119,24 +120,14 @@ void CMFCGLIMSWDlg::OnSysCommand(UINT nID, LPARAM lParam)
     }
 }
 
+
 void CMFCGLIMSWDlg::OnPaint()
 {
-    CPaintDC dc(this);
-    if (IsIconic())
-    {
-        SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
-        int cxIcon = GetSystemMetrics(SM_CXICON);
-        int cyIcon = GetSystemMetrics(SM_CYICON);
-        CRect rect;
-        GetClientRect(&rect);
-        int x = (rect.Width() - cxIcon + 1) / 2;
-        int y = (rect.Height() - cyIcon + 1) / 2;
-        dc.DrawIcon(x, y, m_hIcon);
-    }
-    else
-    {
-        m_image.Draw(dc, 0, 50);
-    }
+    PAINTSTRUCT ps;
+    HWND hwnd = GetSafeHwnd();
+    HDC hdc = ::BeginPaint(hwnd, &ps);
+    m_image.Draw(hdc, 0, 50);
+    ::EndPaint(hwnd, &ps);
 }
 
 HCURSOR CMFCGLIMSWDlg::OnQueryDragIcon()
@@ -157,6 +148,7 @@ void CMFCGLIMSWDlg::OnBnClickedButton2()
     GetDlgItemText(IDC_EDIT2, editValue);
     OuterCircleThickness = _ttof(editValue);
 }
+
 
 bool CMFCGLIMSWDlg::isInCircle(int i, int j, int nCenterX, int nCenterY, int nRadius)
 {
@@ -233,7 +225,8 @@ void CMFCGLIMSWDlg::RedrawAll()
             double center_y = ((Ax * Ax + Ay * Ay) * (Cx - Bx) +
                 (Bx * Bx + By * By) * (Ax - Cx) +
                 (Cx * Cx + Cy * Cy) * (Bx - Ax)) / D;
-            double R = sqrt((Ax - center_x) * (Ax - center_x) + (Ay - center_y) * (Ay - center_y));
+            double R = sqrt((Ax - center_x) * (Ax - center_x) +
+                (Ay - center_y) * (Ay - center_y));
             drawRing(fm, center_x, center_y, R, OuterCircleThickness, 50);
         }
     }
@@ -242,8 +235,10 @@ void CMFCGLIMSWDlg::RedrawAll()
 
 void CMFCGLIMSWDlg::UpdateDisplay()
 {
-    CClientDC dc(this);
-    m_image.Draw(dc, 0, 50);
+    HWND hWnd = GetSafeHwnd();
+    HDC hdc = ::GetDC(hWnd);
+    m_image.Draw(hdc, 0, 50);
+    ::ReleaseDC(hWnd, hdc);
 }
 
 void CMFCGLIMSWDlg::OnBnClickedButtonReset()
@@ -321,12 +316,27 @@ void CMFCGLIMSWDlg::OnLButtonUp(UINT nFlags, CPoint point)
         m_bDragging = false;
         m_nDraggingIndex = -1;
         ReleaseCapture();
+
+        if (numOfCircle == 3)
+        {
+            CString coordText;
+            coordText.Format(_T("(%d, %d)\r\n(%d, %d)\r\n(%d, %d)"),
+                m_circleCenters[0].x, m_circleCenters[0].y,
+                m_circleCenters[1].x, m_circleCenters[1].y,
+                m_circleCenters[2].x, m_circleCenters[2].y);
+            SetDlgItemText(IDC_EDIT_COORDS, coordText);
+        }
     }
     CDialogEx::OnLButtonUp(nFlags, point);
 }
 
+
 void CMFCGLIMSWDlg::OnBnClickedButtonRandom()
 {
+    LARGE_INTEGER li;
+    QueryPerformanceCounter(&li);
+    srand((unsigned)(time(NULL) ^ li.LowPart));
+
     OnBnClickedButtonReset();
     int nPitch = m_image.GetPitch();
     unsigned char* fm = (unsigned char*)m_image.GetBits();
@@ -338,6 +348,7 @@ void CMFCGLIMSWDlg::OnBnClickedButtonRandom()
     {
         int centerX = r + rand() % (IMAGE_WIDTH - 2 * r);
         int centerY = r + rand() % (IMAGE_HEIGHT - 2 * r);
+
         if (centerX - r < 0 || centerY - r < 0 ||
             centerX + r >= IMAGE_WIDTH || centerY + r >= IMAGE_HEIGHT)
         {
@@ -360,7 +371,7 @@ void CMFCGLIMSWDlg::OnBnClickedButtonRandom()
     UpdateDisplay();
     if (numOfCircle == 3)
         RedrawAll();
-    
+
     AfxBeginThread(AutoMoveRingThreadProc, this);
 }
 
@@ -370,6 +381,10 @@ UINT CMFCGLIMSWDlg::AutoMoveRingThreadProc(LPVOID pParam)
     if (!pDlg)
         return 0;
     int r = static_cast<int>(pDlg->ClickPointCircleRadius);
+    
+    LARGE_INTEGER li;
+    QueryPerformanceCounter(&li);
+    srand((unsigned)(time(NULL) ^ li.LowPart));
     for (int i = 0; i < 10; i++)
     {
         for (int j = 0; j < 3; j++)
@@ -379,14 +394,23 @@ UINT CMFCGLIMSWDlg::AutoMoveRingThreadProc(LPVOID pParam)
             pDlg->m_circleCenters[j] = CPoint(x, y);
         }
         pDlg->numOfCircle = 3;
+        // UI thread
         pDlg->PostMessage(WM_UPDATE_RANDOM_RING, 0, 0);
         Sleep(500);
     }
     return 0;
 }
-
 LRESULT CMFCGLIMSWDlg::OnUpdateRandomRing(WPARAM wParam, LPARAM lParam)
 {
     RedrawAll();
+    if (numOfCircle == 3)
+    {
+        CString coordText;
+        coordText.Format(_T("(%d, %d)\r\n(%d, %d)\r\n(%d, %d)"),
+            m_circleCenters[0].x, m_circleCenters[0].y,
+            m_circleCenters[1].x, m_circleCenters[1].y,
+            m_circleCenters[2].x, m_circleCenters[2].y);
+        SetDlgItemText(IDC_EDIT_COORDS, coordText);
+    }
     return 0;
 }
